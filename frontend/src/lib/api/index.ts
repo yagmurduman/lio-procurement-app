@@ -100,6 +100,7 @@ export interface ExtractionResponse {
   data?: ExtractedVendorData;
   error?: string;
   missingFields?: string[];
+  warnings?: string[];
 }
 
 export interface Supplier {

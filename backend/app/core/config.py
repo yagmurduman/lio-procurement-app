@@ -22,9 +22,13 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str | None = None
-    # gpt-4o-mini keeps extraction snappy — latency matters on the upload flow,
-    # and larger models were noticeably slower without a real quality gain.
-    openai_model: str = "gpt-4o-mini"
+    # Extraction: gpt-4o. On Acme's sample quotes the mini models named the
+    # addressee as the vendor when the seller's letterhead is an image
+    # (verdeform quote).
+    openai_model: str = "gpt-4o"
+    # Commodity classification (two short calls per upload): mini classified
+    # all sample quotes correctly, so keep it cheap.
+    openai_classification_model: str = "gpt-4o-mini"
 
     # CORS — NoDecode lets us accept a plain comma-separated string instead of
     # the JSON list pydantic-settings would otherwise demand from env vars.

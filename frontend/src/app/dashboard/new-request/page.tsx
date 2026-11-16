@@ -52,7 +52,11 @@ export default function NewRequestPage() {
     const uploadedFile = e.target.files?.[0];
     if (!uploadedFile) return;
 
-    if (uploadedFile.type !== 'application/pdf') {
+    // Some browsers/OSes report an empty MIME type (e.g. for "Quote.Pdf"), so
+    // fall back to the extension; the backend verifies the file content.
+    const isPdf =
+      uploadedFile.type === 'application/pdf' || uploadedFile.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
       setError('Please upload a PDF file');
       return;
     }
@@ -85,16 +89,21 @@ export default function NewRequestPage() {
       setTotalCost(extracted.totalCost || 0);
       
       // Set commodity group (now included in extraction)
-      if (extracted.commodityGroupId) {
-        setCommodityGroupId(extracted.commodityGroupId);
-      }
+      setCommodityGroupId(extracted.commodityGroupId ?? null);
 
-      // Show warnings for missing fields
+      // Show warnings for missing fields and numbers that don't add up
+      const warnings: string[] = [];
       if (extractionResult.missingFields && extractionResult.missingFields.length > 0) {
-        setWarning(
+        warnings.push(
           `⚠️ Could not extract: ${extractionResult.missingFields.join(', ')}. Please fill in these fields manually.`
         );
       }
+      if (extractionResult.warnings && extractionResult.warnings.length > 0) {
+        warnings.push(
+          `⚠️ Please double-check the order lines against the PDF: ${extractionResult.warnings.join(' ')}`
+        );
+      }
+      setWarning(warnings.join('\n'));
 
       setSuccess('✓ PDF extracted successfully! Review and submit.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -210,7 +219,7 @@ export default function NewRequestPage() {
       </div>
 
       {error && <Alert variant="error" className="mb-6">{error}</Alert>}
-      {warning && <Alert variant="warning" className="mb-6">{warning}</Alert>}
+      {warning && <Alert variant="warning" className="mb-6 whitespace-pre-line">{warning}</Alert>}
       {success && <Alert variant="success" className="mb-6">{success}</Alert>}
 
       <form onSubmit={handleSubmit} className="space-y-8">
