@@ -41,3 +41,5 @@ class ExtractionResponse(BaseModel):
     data: ExtractedVendorData | None = None
     error: str | None = None
     missing_fields: list[str] | None = Field(default=None, alias="missingFields")
+    warnings: list[str] | None = None
+    applied_booking_rule: str | None = Field(default=None, alias="appliedBookingRule")

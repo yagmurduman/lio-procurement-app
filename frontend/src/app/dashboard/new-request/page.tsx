@@ -36,6 +36,12 @@ export default function NewRequestPage() {
   const [warning, setWarning] = useState('');
   const [extracting, setExtracting] = useState(false);
 
+  // Catalog articles with negotiated prices, keyed by order line description
+  // (so edited, added or removed lines never show another line's articles)
+  const [suggestions, setSuggestions] = useState<Record<string, api.Article[]>>({});
+  const [checkingCatalog, setCheckingCatalog] = useState(false);
+  const [catalogNote, setCatalogNote] = useState('');
+
   // PDF parsing mutation
   const parsePDFMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -52,12 +58,18 @@ export default function NewRequestPage() {
     const uploadedFile = e.target.files?.[0];
     if (!uploadedFile) return;
 
-    if (uploadedFile.type !== 'application/pdf') {
+    // Some browsers/OSes report an empty MIME type (e.g. for "Quote.Pdf"), so
+    // fall back to the extension; the backend verifies the file content.
+    const isPdf =
+      uploadedFile.type === 'application/pdf' || uploadedFile.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
       setError('Please upload a PDF file');
       return;
     }
 
     setFile(uploadedFile);
+    setSuggestions({});
+    setCatalogNote('');
     setError('');
     setSuccess('');
     setWarning('');
@@ -82,21 +94,31 @@ export default function NewRequestPage() {
       setVatId(extracted.vatId || '');
       setDepartment(extracted.department || '');
       setOrderLines(extracted.orderLines || []);
+      void checkCatalog(extracted.orderLines || []);
       setTotalCost(extracted.totalCost || 0);
       
       // Set commodity group (now included in extraction)
-      if (extracted.commodityGroupId) {
-        setCommodityGroupId(extracted.commodityGroupId);
-      }
+      setCommodityGroupId(extracted.commodityGroupId ?? null);
 
-      // Show warnings for missing fields
+      // Show warnings for missing fields and numbers that don't add up
+      const warnings: string[] = [];
       if (extractionResult.missingFields && extractionResult.missingFields.length > 0) {
-        setWarning(
+        warnings.push(
           `⚠️ Could not extract: ${extractionResult.missingFields.join(', ')}. Please fill in these fields manually.`
         );
       }
+      if (extractionResult.warnings && extractionResult.warnings.length > 0) {
+        warnings.push(
+          `⚠️ Please double-check the order lines against the PDF: ${extractionResult.warnings.join(' ')}`
+        );
+      }
+      setWarning(warnings.join('\n'));
 
-      setSuccess('✓ PDF extracted successfully! Review and submit.');
+      setSuccess(
+        extractionResult.appliedBookingRule
+          ? `✓ PDF extracted successfully! Commodity group set by your booking rule "${extractionResult.appliedBookingRule}". Review and submit.`
+          : '✓ PDF extracted successfully! Review and submit.'
+      );
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error('Extraction error:', err);
@@ -105,6 +127,42 @@ export default function NewRequestPage() {
     } finally {
       setExtracting(false);
     }
+  };
+
+  // Look up negotiated catalog prices for the given order lines
+  const checkCatalog = async (lines: OrderLine[]) => {
+    setCheckingCatalog(true);
+    setCatalogNote('');
+    try {
+      const descriptions = lines.map((l) => l.positionDescription);
+      const { matches } = await api.articles.suggest(descriptions);
+      setSuggestions(Object.fromEntries(descriptions.map((d, i) => [d, matches[i]])));
+      if (matches.every((m) => m.length === 0)) {
+        setCatalogNote('No matching articles in your catalog.');
+      }
+    } catch {
+      setSuggestions({});
+      setCatalogNote('Could not check the catalog.');
+    } finally {
+      setCheckingCatalog(false);
+    }
+  };
+
+  // Replace a line with a catalog article at its negotiated price; the price
+  // only holds with that supplier, so it becomes the request's vendor.
+  const applyCatalogArticle = (index: number, article: api.Article) => {
+    const unitPrice = parseFloat(article.unit_price);
+    const updated = [...orderLines];
+    updated[index] = {
+      ...updated[index],
+      positionDescription: article.description,
+      unitPrice,
+      unit: article.unit,
+      totalPrice: unitPrice * updated[index].amount,
+    };
+    setOrderLines(updated);
+    setTotalCost(updated.reduce((sum, line) => sum + line.totalPrice, 0));
+    if (article.supplier_name) setVendorName(article.supplier_name);
   };
 
   // Add order line manually
@@ -210,7 +268,7 @@ export default function NewRequestPage() {
       </div>
 
       {error && <Alert variant="error" className="mb-6">{error}</Alert>}
-      {warning && <Alert variant="warning" className="mb-6">{warning}</Alert>}
+      {warning && <Alert variant="warning" className="mb-6 whitespace-pre-line">{warning}</Alert>}
       {success && <Alert variant="success" className="mb-6">{success}</Alert>}
 
       <form onSubmit={handleSubmit} className="space-y-8">
@@ -356,10 +414,22 @@ export default function NewRequestPage() {
         <div className="lio-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold tracking-tight text-ink">Order Lines *</h2>
-            <Button type="button" onClick={addOrderLine} variant="outline" size="sm">
-              + Add Line
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                onClick={() => checkCatalog(orderLines)}
+                variant="outline"
+                size="sm"
+                disabled={checkingCatalog || orderLines.length === 0}
+              >
+                {checkingCatalog ? 'Checking catalog…' : 'Check catalog prices'}
+              </Button>
+              <Button type="button" onClick={addOrderLine} variant="outline" size="sm">
+                + Add Line
+              </Button>
+            </div>
           </div>
+          {catalogNote && <p className="text-sm text-gray-500 mb-4">{catalogNote}</p>}
 
           {orderLines.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
@@ -423,6 +493,58 @@ export default function NewRequestPage() {
                       placeholder="pcs, licenses, etc."
                     />
                   </div>
+
+                  {suggestions[line.positionDescription]?.length > 0 && (
+                    <details
+                      open
+                      className="mt-4 rounded-lg border border-accent/40 bg-accent-soft/20 p-3"
+                    >
+                      <summary className="cursor-pointer text-sm font-bold text-ink">
+                        Negotiated prices in your catalog (
+                        {suggestions[line.positionDescription].length})
+                      </summary>
+                      <ul className="mt-2 space-y-2">
+                        {suggestions[line.positionDescription].map((article) => {
+                          const price = parseFloat(article.unit_price);
+                          const saving =
+                            article.unit.toLowerCase() === line.unit.trim().toLowerCase()
+                              ? line.unitPrice - price
+                              : 0;
+                          return (
+                            <li
+                              key={article.id}
+                              className="flex items-center justify-between gap-4 rounded-md border border-accent/40 px-3 py-2 text-sm"
+                            >
+                              <div>
+                                <p className="font-medium text-ink">{article.description}</p>
+                                <p className="text-gray-600">
+                                  {article.supplier_name} ·{' '}
+                                  <strong className="text-ink">
+                                    ${price.toFixed(2)} / {article.unit}
+                                  </strong>
+                                  {saving > 0 && (
+                                    <span className="text-green-700">
+                                      {' '}
+                                      · save ${saving.toFixed(2)} per {article.unit}
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="shrink-0 whitespace-nowrap"
+                                onClick={() => applyCatalogArticle(index, article)}
+                              >
+                                Use this
+                              </Button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </details>
+                  )}
 
                   <div className="mt-2 text-right">
                     <span className="text-sm text-gray-600">Total: </span>

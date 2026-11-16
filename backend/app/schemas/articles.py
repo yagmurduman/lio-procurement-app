@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ArticleOut(BaseModel):
@@ -27,3 +27,12 @@ class ArticlePage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class SuggestionRequest(BaseModel):
+    descriptions: list[str] = Field(max_length=100)
+
+
+class SuggestionResponse(BaseModel):
+    # One list per order line, in request order.
+    matches: list[list[ArticleOut]]

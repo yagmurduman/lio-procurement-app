@@ -5,9 +5,30 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.deps import get_current_membership
 from app.db.session import get_db
 from app.models import Article, OrganizationMember
-from app.schemas.articles import ArticleOut, ArticlePage
+from app.schemas.articles import (
+    ArticleOut,
+    ArticlePage,
+    SuggestionRequest,
+    SuggestionResponse,
+)
+from app.services.article_matching import suggest_articles
 
 router = APIRouter(prefix="/articles", tags=["articles"])
+
+
+def _article_out(a: Article) -> ArticleOut:
+    return ArticleOut(
+        id=a.id,
+        article_number=a.article_number,
+        supplier_id=a.supplier_id,
+        supplier_name=a.supplier.name if a.supplier else None,
+        description=a.description,
+        unit_price=a.unit_price,
+        currency=a.currency,
+        unit=a.unit,
+        quantity=a.quantity,
+        created_at=a.created_at,
+    )
 
 
 @router.get("", response_model=ArticlePage)
@@ -42,21 +63,7 @@ def list_articles(
         .offset(offset)
         .limit(limit)
     )
-    items = [
-        ArticleOut(
-            id=a.id,
-            article_number=a.article_number,
-            supplier_id=a.supplier_id,
-            supplier_name=a.supplier.name if a.supplier else None,
-            description=a.description,
-            unit_price=a.unit_price,
-            currency=a.currency,
-            unit=a.unit,
-            quantity=a.quantity,
-            created_at=a.created_at,
-        )
-        for a in db.scalars(stmt)
-    ]
+    items = [_article_out(a) for a in db.scalars(stmt)]
     return ArticlePage(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -74,3 +81,14 @@ def count_articles(
         or 0
     )
     return {"count": total}
+
+
+@router.post("/suggestions", response_model=SuggestionResponse)
+def suggest(
+    payload: SuggestionRequest,
+    membership: OrganizationMember = Depends(get_current_membership),
+    db: Session = Depends(get_db),
+) -> SuggestionResponse:
+    """Catalog articles (negotiated prices) matching each order line description."""
+    matches = suggest_articles(db, membership.organization_id, payload.descriptions)
+    return SuggestionResponse(matches=[[_article_out(a) for a in m] for m in matches])
