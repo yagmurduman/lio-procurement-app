@@ -105,7 +105,11 @@ export default function NewRequestPage() {
       }
       setWarning(warnings.join('\n'));
 
-      setSuccess('✓ PDF extracted successfully! Review and submit.');
+      setSuccess(
+        extractionResult.appliedBookingRule
+          ? `✓ PDF extracted successfully! Commodity group set by your booking rule "${extractionResult.appliedBookingRule}". Review and submit.`
+          : '✓ PDF extracted successfully! Review and submit.'
+      );
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error('Extraction error:', err);

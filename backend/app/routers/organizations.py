@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_membership, get_current_user, require_org_admin
 from app.db.session import get_db
 from app.models import (
+    CommodityGroup,
     Organization,
     OrganizationInvite,
     OrganizationMember,
@@ -27,6 +28,7 @@ from app.schemas.organizations import (
     OrganizationOut,
     OrganizationSettings,
 )
+from app.services.booking_rules import org_settings
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -84,8 +86,7 @@ def get_settings(
     membership: OrganizationMember = Depends(get_current_membership),
     db: Session = Depends(get_db),
 ) -> OrganizationSettings:
-    org = db.get(Organization, membership.organization_id)
-    return OrganizationSettings(**(org.settings or {}))
+    return org_settings(db, membership.organization_id)
 
 
 @router.patch("/me/settings", response_model=OrganizationSettings)
@@ -94,10 +95,23 @@ def update_settings(
     membership: OrganizationMember = Depends(require_org_admin),
     db: Session = Depends(get_db),
 ) -> OrganizationSettings:
+    unknown = {
+        rule.commodity_group_id
+        for rule in payload.booking_rules
+        if db.get(CommodityGroup, rule.commodity_group_id) is None
+    }
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown commodity group id(s) in booking rules: {sorted(unknown)}",
+        )
+
     org = db.get(Organization, membership.organization_id)
-    org.settings = payload.model_dump()
+    # PATCH: only overwrite the settings the client sent, so saving one setting
+    # (e.g. required fields) doesn't wipe the others (e.g. booking rules).
+    org.settings = {**(org.settings or {}), **payload.model_dump(exclude_unset=True)}
     db.commit()
-    return payload
+    return OrganizationSettings(**org.settings)
 
 
 @router.get("/me/members", response_model=MembersResponse)

@@ -101,6 +101,7 @@ export interface ExtractionResponse {
   error?: string;
   missingFields?: string[];
   warnings?: string[];
+  appliedBookingRule?: string;
 }
 
 export interface Supplier {

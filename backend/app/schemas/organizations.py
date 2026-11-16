@@ -11,6 +11,21 @@ MemberRole = Literal["admin", "buyer", "requester"]
 ConfigurableRequiredField = Literal["vat_id", "department"]
 
 
+class BookingRule(BaseModel):
+    """A customer's accounting rule: matching requests always book to one group.
+
+    Matches when any keyword appears (case-insensitive) in the request title or
+    an order line, and — if ``max_total`` is set — the total is below it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    keywords: list[str] = Field(min_length=1)
+    commodity_group_id: int
+    max_total: float | None = None
+
+
 class OrganizationSettings(BaseModel):
     """Per-organization configuration. Stored as JSONB, validated here.
 
@@ -21,6 +36,7 @@ class OrganizationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     required_fields: list[ConfigurableRequiredField] = Field(default_factory=list)
+    booking_rules: list[BookingRule] = Field(default_factory=list)
 
 
 class OrganizationCreate(BaseModel):

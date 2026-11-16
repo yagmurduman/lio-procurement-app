@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import CommodityGroup
 from app.schemas.extraction import ExtractedVendorData, ExtractionResponse, OrderLineData
+from app.schemas.organizations import BookingRule
+from app.services.booking_rules import find_booking_rule
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +221,13 @@ def _classify(
 # --- entry point -------------------------------------------------------------
 
 
-def extract_vendor_data(pdf_text: str, db: Session) -> ExtractionResponse:
-    """Extract vendor data from quote text and classify its commodity group."""
+def extract_vendor_data(
+    pdf_text: str, db: Session, booking_rules: list[BookingRule] | None = None
+) -> ExtractionResponse:
+    """Extract vendor data from quote text and classify its commodity group.
+
+    A matching organization booking rule decides the group instead of the AI.
+    """
     if not pdf_text or not pdf_text.strip():
         return ExtractionResponse(success=False, error="No text provided for extraction")
 
@@ -248,11 +255,21 @@ def extract_vendor_data(pdf_text: str, db: Session) -> ExtractionResponse:
             "details manually.",
         )
 
-    try:
-        group = _classify(client, quote, groups)
-    except Exception:
-        logger.exception("Error classifying commodity group")
-        group = None
+    total_cost = quote.grand_total or sum(line.total_price for line in quote.line_items)
+    rule = find_booking_rule(
+        booking_rules or [],
+        quote.title,
+        (line.description for line in quote.line_items),
+        total_cost,
+    )
+    if rule:
+        group = next((g for g in groups if g.id == rule.commodity_group_id), None)
+    else:
+        try:
+            group = _classify(client, quote, groups)
+        except Exception:
+            logger.exception("Error classifying commodity group")
+            group = None
 
     extracted = ExtractedVendorData(
         title=quote.title,
@@ -269,8 +286,7 @@ def extract_vendor_data(pdf_text: str, db: Session) -> ExtractionResponse:
             )
             for line in quote.line_items
         ],
-        total_cost=quote.grand_total
-        or sum(line.total_price for line in quote.line_items),
+        total_cost=total_cost,
         commodity_group_id=group.id if group else None,
         commodity_group_name=group.name if group else None,
     )
@@ -296,4 +312,5 @@ def extract_vendor_data(pdf_text: str, db: Session) -> ExtractionResponse:
         data=extracted,
         missing_fields=missing_fields or None,
         warnings=issues or None,
+        applied_booking_rule=rule.label if rule else None,
     )

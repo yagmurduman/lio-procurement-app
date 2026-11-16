@@ -10,12 +10,12 @@ from app.db.session import get_db
 from app.models import (
     CommodityGroup,
     OrderLine,
-    Organization,
     OrganizationMember,
     ProcurementRequest,
     RequestActivity,
     RequestDocument,
 )
+from app.schemas.organizations import BookingRule
 from app.schemas.requests import (
     ApprovalDecision,
     RequestActivityOut,
@@ -24,6 +24,7 @@ from app.schemas.requests import (
     RequestUpdate,
     StatusUpdate,
 )
+from app.services.booking_rules import find_booking_rule, org_settings
 
 router = APIRouter(prefix="/requests", tags=["requests"])
 
@@ -82,14 +83,43 @@ def _enforce_required_fields(
     db: Session, organization_id: uuid.UUID, payload: RequestCreate | RequestUpdate
 ) -> None:
     """Enforce the org's configurable required fields (see OrganizationSettings)."""
-    org = db.get(Organization, organization_id)
-    required = (org.settings or {}).get("required_fields", []) if org else []
+    required = org_settings(db, organization_id).required_fields
     missing = [field for field in required if not getattr(payload, field, None)]
     if missing:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Missing fields required by your organization: {', '.join(missing)}",
         )
+
+
+def _apply_booking_rules(
+    db: Session, organization_id: uuid.UUID, payload: RequestCreate | RequestUpdate
+) -> BookingRule | None:
+    """Force the org's booking rule group onto the payload; return the rule if it changed it."""
+    rule = find_booking_rule(
+        org_settings(db, organization_id).booking_rules,
+        payload.title,
+        (line.position_description for line in payload.order_lines),
+        payload.total_cost,
+    )
+    if rule is None or rule.commodity_group_id == payload.commodity_group_id:
+        return None
+    payload.commodity_group_id = rule.commodity_group_id
+    return rule
+
+
+def _log_booking_rule(
+    db: Session, request_id: uuid.UUID, actor_id: uuid.UUID, rule: BookingRule
+) -> None:
+    group = db.get(CommodityGroup, rule.commodity_group_id)
+    _log_activity(
+        db,
+        request_id,
+        actor_id,
+        "booking_rule_applied",
+        f"Commodity group set to {group.name} by booking rule: {rule.label}",
+        {"rule": rule.label, "commodity_group_id": rule.commodity_group_id},
+    )
 
 
 def _log_activity(
@@ -183,6 +213,7 @@ def create_request(
 ) -> RequestOut:
     _validate_commodity_group(db, payload.commodity_group_id)
     _enforce_required_fields(db, membership.organization_id, payload)
+    rule = _apply_booking_rules(db, membership.organization_id, payload)
 
     # Vendor fields are already cleaned up during extraction, so we can persist
     # them directly here.
@@ -213,6 +244,8 @@ def create_request(
     db.add(request)
     db.flush()
     _log_activity(db, request.id, membership.user_id, "created", "Request created")
+    if rule:
+        _log_booking_rule(db, request.id, membership.user_id, rule)
     db.commit()
 
     request = _get_org_request(db, request.id, membership.organization_id)
@@ -229,6 +262,7 @@ def update_request(
     request = _get_org_request(db, request_id, membership.organization_id)
     _validate_commodity_group(db, payload.commodity_group_id)
     _enforce_required_fields(db, membership.organization_id, payload)
+    rule = _apply_booking_rules(db, membership.organization_id, payload)
 
     changed = _changed_fields(request, payload)
 
@@ -263,6 +297,8 @@ def update_request(
             f"Updated {', '.join(labels)}",
             {"changed_fields": changed},
         )
+    if rule:
+        _log_booking_rule(db, request.id, membership.user_id, rule)
     db.commit()
 
     request = _get_org_request(db, request_id, membership.organization_id)

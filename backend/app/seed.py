@@ -52,6 +52,35 @@ ORG_ACCOUNTS: list[tuple[str, str, list[tuple[str, str, str]]]] = [
 ]
 
 
+# Acme's accounting rules (complaint #3).
+ACME_BOOKING_RULES: list[dict] = [
+    {
+        "label": "Cable ties → Electrical Engineering",
+        "keywords": ["cable tie", "zip tie"],
+        "commodity_group_id": 11,  # Facility Management / Electrical Engineering
+    },
+    {
+        "label": "Printer toner → IT Hardware",
+        "keywords": ["toner"],
+        "commodity_group_id": 29,  # Information Technology / Hardware
+    },
+    {
+        "label": "Software subscriptions under $2,000 → Office Equipment",
+        "keywords": ["software subscription", "saas", "software license", "subscription license"],
+        "commodity_group_id": 15,  # Facility Management / Office Equipment
+        "max_total": 2000,
+    },
+]
+
+
+def seed_booking_rules(org: Organization) -> int:
+    """Give Acme its booking rules unless the org has configured them (even to none)."""
+    if "booking_rules" in (org.settings or {}):
+        return 0
+    org.settings = {**(org.settings or {}), "booking_rules": ACME_BOOKING_RULES}
+    return len(ACME_BOOKING_RULES)
+
+
 def seed_commodity_groups(db: Session) -> int:
     """Insert commodity groups that aren't already present (keyed by id)."""
     existing = set(db.scalars(select(CommodityGroup.id)))
@@ -179,6 +208,7 @@ def seed(db: Session) -> dict[str, int]:
         "suppliers": seed_suppliers(db, dev_org_id) if dev_org_id else 0,
         # Articles reference suppliers by name, so this must run after suppliers.
         "articles": seed_articles(db, dev_org_id) if dev_org_id else 0,
+        "booking_rules": seed_booking_rules(dev_org) if dev_org else 0,
         "organizations": orgs_created,
         "users": users_created,
     }
