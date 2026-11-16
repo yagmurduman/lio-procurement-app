@@ -22,9 +22,9 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str | None = None
-    # Extraction: gpt-4o. On Acme's sample quotes the mini models named the
-    # addressee as the vendor when the seller's letterhead is an image
-    # (verdeform quote).
+    # Extraction and catalog matching: gpt-4o. On Acme's sample quotes the mini
+    # models named the addressee as the vendor when the seller's letterhead is
+    # an image (verdeform quote), and missed the moss panels in the catalog.
     openai_model: str = "gpt-4o"
     # Commodity classification (two short calls per upload): mini classified
     # all sample quotes correctly, so keep it cheap.

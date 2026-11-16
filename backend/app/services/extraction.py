@@ -72,8 +72,9 @@ Rules:
     also when they appear only in the totals block (e.g. "Shipping (net) $215.00" ->
     a line "Shipping", quantity 1, unit "lump sum").
   * Taxes and government fees (sales tax, recycling fees) are NEVER line items.
-  * unit: write abbreviations out ("ea." -> "pieces", "sq ft" -> "square feet"); use
-    "lump sum" for services and charges priced as a single amount.
+  * unit: a short singular catalog unit. Convert "ea.", "each", "pcs", "pieces" -> "piece";
+    otherwise e.g. "sq ft", "ft", "lb", "gal", "hour", "month", "license"; "lump sum" for
+    services and charges priced as a single amount.
 - tax_and_fees: the sum of all taxes and government fees in the totals block (e.g. sales
   tax on items + sales tax on shipping + recycling fee). 0 if there are none.
 - grand_total: the final total including everything, as printed. null if absent.

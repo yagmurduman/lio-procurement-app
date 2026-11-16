@@ -317,6 +317,11 @@ export const articles = {
   count(): Promise<{ count: number }> {
     return apiFetch('/articles/count');
   },
+
+  /** Catalog articles (negotiated prices) per order line description, best match first. */
+  suggest(descriptions: string[]): Promise<{ matches: Article[][] }> {
+    return apiFetch('/articles/suggestions', { body: { descriptions } });
+  },
 };
 
 // ============================================================================
